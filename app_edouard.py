@@ -1,66 +1,86 @@
 import streamlit as st
 import streamlit.components.v1 as components
 import os
-from datetime import datetime
 import base64
+from datetime import datetime
 
-st.title("Uroflow acoustique - Enregistrement brut")
+st.title("Uroflow acoustique – Enregistrement brut")
 
 data_dir = "audio"
 os.makedirs(data_dir, exist_ok=True)
 
-audio_base64 = components.html(
-"""
-<script src="https://unpkg.com/streamlit-component-lib@1.4.0/dist/index.js"></script>
-
+audio_data = components.html("""
 <style>
-.record{
+.container{
+display:flex;
+flex-direction:column;
+align-items:center;
+gap:10px;
+}
+
+.rec{
 width:140px;
 height:140px;
 border-radius:70px;
 background:red;
 color:white;
-font-size:24px;
+font-size:26px;
 border:none;
 }
 
 .stop{
 width:140px;
 height:50px;
-margin-top:10px;
+font-size:18px;
 }
 
 #timer{
 font-size:22px;
+font-weight:bold;
+}
+
+canvas{
+background:black;
+border-radius:6px;
 margin-top:10px;
 }
 </style>
 
-<button class="record" onclick="startRec()">REC</button>
-<button class="stop" onclick="stopRec()">STOP</button>
+<div class="container">
+<button class="rec" onclick="startRecording()">REC</button>
+<button class="stop" onclick="stopRecording()">STOP</button>
 <div id="timer">00:00</div>
+<canvas id="spec" width="420" height="160"></canvas>
+</div>
 
 <script>
 let stream;
-let audioCtx;
+let audioContext;
 let source;
 let processor;
+let analyser;
 let chunks=[];
 let timerInterval;
 let seconds=0;
+let animationId;
+
+const timer=document.getElementById("timer");
+const canvas=document.getElementById("spec");
+const ctx=canvas.getContext("2d");
 
 function updateTimer(){
 seconds++;
 let m=String(Math.floor(seconds/60)).padStart(2,"0");
 let s=String(seconds%60).padStart(2,"0");
-document.getElementById("timer").innerText=m+":"+s;
+timer.innerText=m+":"+s;
 }
 
-async function startRec(){
+async function startRecording(){
 
-seconds=0;
 chunks=[];
-document.getElementById("timer").innerText="00:00";
+seconds=0;
+timer.innerText="00:00";
+
 timerInterval=setInterval(updateTimer,1000);
 
 stream = await navigator.mediaDevices.getUserMedia({
@@ -72,21 +92,54 @@ autoGainControl:false
 }
 });
 
-audioCtx = new (window.AudioContext || window.webkitAudioContext)({sampleRate:48000});
-source = audioCtx.createMediaStreamSource(stream);
-processor = audioCtx.createScriptProcessor(4096,1,1);
+audioContext = new (window.AudioContext || window.webkitAudioContext)({sampleRate:48000});
+source = audioContext.createMediaStreamSource(stream);
 
-source.connect(processor);
-processor.connect(audioCtx.destination);
+analyser = audioContext.createAnalyser();
+analyser.fftSize=1024;
+
+processor = audioContext.createScriptProcessor(4096,1,1);
+
+source.connect(analyser);
+analyser.connect(processor);
+processor.connect(audioContext.destination);
 
 processor.onaudioprocess = e=>{
 chunks.push(new Float32Array(e.inputBuffer.getChannelData(0)));
 };
+
+draw();
 }
 
-function stopRec(){
+function draw(){
+const bufferLength=analyser.frequencyBinCount;
+const data=new Uint8Array(bufferLength);
+analyser.getByteFrequencyData(data);
+
+ctx.fillStyle="black";
+ctx.fillRect(0,0,canvas.width,canvas.height);
+
+let barWidth=(canvas.width/bufferLength)*2;
+let x=0;
+
+for(let i=0;i<bufferLength;i++){
+let h=data[i]/2;
+ctx.fillStyle="rgb(0,200,255)";
+ctx.fillRect(x,canvas.height-h,barWidth,h);
+x+=barWidth+1;
+}
+
+animationId=requestAnimationFrame(draw);
+}
+
+function stopRecording(){
 
 clearInterval(timerInterval);
+cancelAnimationFrame(animationId);
+
+processor.disconnect();
+analyser.disconnect();
+source.disconnect();
 
 let length=0;
 chunks.forEach(c=>length+=c.length);
@@ -99,20 +152,18 @@ data.set(c,offset);
 offset+=c.length;
 });
 
-let wav = encodeWAV(data, audioCtx.sampleRate);
+let wav = encodeWAV(data, audioContext.sampleRate);
 let base64 = arrayBufferToBase64(wav);
 
-// envoi vers Streamlit
 window.parent.postMessage({
-isStreamlitMessage: true,
-type: "streamlit:setComponentValue",
-value: base64
-}, "*");
+type:"streamlit:setComponentValue",
+value:base64
+},"*");
 
 stream.getTracks().forEach(t=>t.stop());
 }
 
-function encodeWAV(samples, sampleRate){
+function encodeWAV(samples,sampleRate){
 let buffer=new ArrayBuffer(44+samples.length*2);
 let view=new DataView(buffer);
 
@@ -156,31 +207,25 @@ binary+=String.fromCharCode(bytes[i]);
 return btoa(binary);
 }
 </script>
-""",
-height=260,
-)
+""", height=420)
 
-# correction importante ici
-if isinstance(audio_base64, str) and len(audio_base64) > 100:
-    try:
-        audio_bytes = base64.b64decode(audio_base64)
+if isinstance(audio_data, str) and len(audio_data) > 100:
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = os.path.join(data_dir, f"audio_{timestamp}.wav")
+    audio_bytes = base64.b64decode(audio_data)
 
-        with open(path, "wb") as f:
-            f.write(audio_bytes)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = os.path.join(data_dir, f"audio_{timestamp}.wav")
 
-        st.success("Audio reçu")
+    with open(path, "wb") as f:
+        f.write(audio_bytes)
 
-        st.audio(audio_bytes)
+    st.success("Enregistrement terminé")
 
-        st.download_button(
-            "Télécharger",
-            audio_bytes,
-            file_name=f"audio_{timestamp}.wav",
-            mime="audio/wav"
-        )
+    st.audio(audio_bytes)
 
-    except Exception as e:
-        st.error(f"Erreur décodage audio: {e}")
+    st.download_button(
+        "Télécharger le fichier",
+        audio_bytes,
+        file_name=f"audio_{timestamp}.wav",
+        mime="audio/wav"
+    )
