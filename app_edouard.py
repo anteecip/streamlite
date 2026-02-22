@@ -212,8 +212,8 @@ return btoa(binary);
 height=420,
 )
 
-# DEBUG (important pour comprendre si Streamlit reçoit l'audio)
-st.write("DEBUG audio reçu :", "None" if audio_data is None else len(audio_data))
+# Debug affiché dans la page
+st.write("DEBUG audio reçu :", None if audio_data is None else len(audio_data))
 
 if isinstance(audio_data, str) and len(audio_data) > 100:
 
