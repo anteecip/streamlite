@@ -227,3 +227,29 @@ def save_audio(base64_audio):
     with open(path, "wb") as f:
         f.write(audio_bytes)
     return path
+
+st.divider()
+st.subheader("Fichiers enregistrés")
+
+files = sorted(os.listdir("audio"), reverse=True)
+
+if len(files) == 0:
+    st.write("Aucun fichier pour l'instant")
+else:
+    for file in files:
+        path = os.path.join("audio", file)
+
+        col1, col2 = st.columns([3,1])
+
+        with col1:
+            st.audio(path)
+
+        with col2:
+            with open(path, "rb") as f:
+                st.download_button(
+                    label="Download",
+                    data=f,
+                    file_name=file,
+                    mime="audio/wav",
+                    key=file
+                )
