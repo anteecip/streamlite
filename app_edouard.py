@@ -155,7 +155,6 @@ offset+=c.length;
 let wav = encodeWAV(data, audioContext.sampleRate);
 let base64 = arrayBufferToBase64(wav);
 
-// envoi vers Streamlit
 window.parent.postMessage(
 {type:"streamlit:setComponentValue", value:base64},
 "*"
@@ -212,26 +211,33 @@ return btoa(binary);
 height=420,
 )
 
-# Debug affiché dans la page
-st.write("DEBUG audio reçu :", None if audio_data is None else len(audio_data))
+# DEBUG sécurisé (ne peut plus planter)
+debug_value = "None"
+if isinstance(audio_data, str):
+    debug_value = len(audio_data)
 
+st.write("DEBUG audio reçu :", debug_value)
+
+# Traitement audio
 if isinstance(audio_data, str) and len(audio_data) > 100:
+    try:
+        audio_bytes = base64.b64decode(audio_data)
 
-    audio_bytes = base64.b64decode(audio_data)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(data_dir, f"audio_{timestamp}.wav")
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = os.path.join(data_dir, f"audio_{timestamp}.wav")
+        with open(path, "wb") as f:
+            f.write(audio_bytes)
 
-    with open(path, "wb") as f:
-        f.write(audio_bytes)
+        st.success("Enregistrement terminé")
 
-    st.success("Enregistrement terminé")
+        st.audio(audio_bytes)
 
-    st.audio(audio_bytes)
-
-    st.download_button(
-        "Télécharger le fichier WAV",
-        audio_bytes,
-        file_name=f"audio_{timestamp}.wav",
-        mime="audio/wav"
-    )
+        st.download_button(
+            "Télécharger le fichier WAV",
+            audio_bytes,
+            file_name=f"audio_{timestamp}.wav",
+            mime="audio/wav"
+        )
+    except Exception as e:
+        st.error(f"Erreur décodage audio : {e}")
