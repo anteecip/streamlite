@@ -4,45 +4,45 @@ import os
 import base64
 from datetime import datetime
 
-st.title("Uroflow acoustique – Enregistrement brut")
+st.title("Uroflow acoustique – Enregistrement audio brut")
 
 data_dir = "audio"
 os.makedirs(data_dir, exist_ok=True)
 
-audio_data = components.html("""
+audio_data = components.html(
+"""
 <style>
 .container{
 display:flex;
 flex-direction:column;
 align-items:center;
-gap:10px;
+gap:12px;
 }
 
 .rec{
-width:140px;
-height:140px;
-border-radius:70px;
+width:150px;
+height:150px;
+border-radius:75px;
 background:red;
 color:white;
-font-size:26px;
+font-size:28px;
 border:none;
 }
 
 .stop{
-width:140px;
-height:50px;
+width:150px;
+height:55px;
 font-size:18px;
 }
 
 #timer{
-font-size:22px;
+font-size:24px;
 font-weight:bold;
 }
 
 canvas{
 background:black;
 border-radius:6px;
-margin-top:10px;
 }
 </style>
 
@@ -155,10 +155,11 @@ offset+=c.length;
 let wav = encodeWAV(data, audioContext.sampleRate);
 let base64 = arrayBufferToBase64(wav);
 
-window.parent.postMessage({
-type:"streamlit:setComponentValue",
-value:base64
-},"*");
+// envoi vers Streamlit
+window.parent.postMessage(
+{type:"streamlit:setComponentValue", value:base64},
+"*"
+);
 
 stream.getTracks().forEach(t=>t.stop());
 }
@@ -207,7 +208,12 @@ binary+=String.fromCharCode(bytes[i]);
 return btoa(binary);
 }
 </script>
-""", height=420)
+""",
+height=420,
+)
+
+# DEBUG (important pour comprendre si Streamlit reçoit l'audio)
+st.write("DEBUG audio reçu :", "None" if audio_data is None else len(audio_data))
 
 if isinstance(audio_data, str) and len(audio_data) > 100:
 
@@ -224,7 +230,7 @@ if isinstance(audio_data, str) and len(audio_data) > 100:
     st.audio(audio_bytes)
 
     st.download_button(
-        "Télécharger le fichier",
+        "Télécharger le fichier WAV",
         audio_bytes,
         file_name=f"audio_{timestamp}.wav",
         mime="audio/wav"
