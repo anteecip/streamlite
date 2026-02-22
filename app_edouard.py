@@ -4,12 +4,14 @@ import os
 import base64
 from datetime import datetime
 
-st.title("Uroflow acoustique – Enregistrement audio brut")
+st.title("Uroflow acoustique – Enregistrement audio")
 
 data_dir = "audio"
 os.makedirs(data_dir, exist_ok=True)
 
-audio_data = components.html(
+st.write("Les fichiers seront enregistrés directement sur le serveur.")
+
+components.html(
 """
 <style>
 .container{
@@ -132,7 +134,7 @@ x+=barWidth+1;
 animationId=requestAnimationFrame(draw);
 }
 
-function stopRecording(){
+async function stopRecording(){
 
 clearInterval(timerInterval);
 cancelAnimationFrame(animationId);
@@ -155,12 +157,15 @@ offset+=c.length;
 let wav = encodeWAV(data, audioContext.sampleRate);
 let base64 = arrayBufferToBase64(wav);
 
-window.parent.postMessage(
-{type:"streamlit:setComponentValue", value:base64},
-"*"
-);
+await fetch("/upload_audio", {
+method: "POST",
+headers: {"Content-Type": "application/json"},
+body: JSON.stringify({audio: base64})
+});
 
 stream.getTracks().forEach(t=>t.stop());
+
+alert("Audio enregistré sur le serveur");
 }
 
 function encodeWAV(samples,sampleRate){
@@ -211,33 +216,14 @@ return btoa(binary);
 height=420,
 )
 
-# DEBUG sécurisé (ne peut plus planter)
-debug_value = "None"
-if isinstance(audio_data, str):
-    debug_value = len(audio_data)
+# endpoint réception audio
+from streamlit.runtime.scriptrunner import get_script_run_ctx
+from streamlit.web.server.server import Server
 
-st.write("DEBUG audio reçu :", debug_value)
-
-# Traitement audio
-if isinstance(audio_data, str) and len(audio_data) > 100:
-    try:
-        audio_bytes = base64.b64decode(audio_data)
-
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        path = os.path.join(data_dir, f"audio_{timestamp}.wav")
-
-        with open(path, "wb") as f:
-            f.write(audio_bytes)
-
-        st.success("Enregistrement terminé")
-
-        st.audio(audio_bytes)
-
-        st.download_button(
-            "Télécharger le fichier WAV",
-            audio_bytes,
-            file_name=f"audio_{timestamp}.wav",
-            mime="audio/wav"
-        )
-    except Exception as e:
-        st.error(f"Erreur décodage audio : {e}")
+def save_audio(base64_audio):
+    audio_bytes = base64.b64decode(base64_audio)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = os.path.join(data_dir, f"audio_{timestamp}.wav")
+    with open(path, "wb") as f:
+        f.write(audio_bytes)
+    return path
