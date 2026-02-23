@@ -9,9 +9,9 @@ st.title("Uroflow acoustique – Enregistrement audio")
 data_dir = "audio"
 os.makedirs(data_dir, exist_ok=True)
 
-st.write("Les fichiers seront enregistrés directement sur le serveur.")
+st.write("Les fichiers sont enregistrés dans le dossier audio du serveur.")
 
-components.html(
+audio_base64 = components.html(
 """
 <style>
 .container{
@@ -62,8 +62,8 @@ let source;
 let processor;
 let analyser;
 let chunks=[];
-let timerInterval;
 let seconds=0;
+let timerInterval;
 let animationId;
 
 const timer=document.getElementById("timer");
@@ -134,7 +134,7 @@ x+=barWidth+1;
 animationId=requestAnimationFrame(draw);
 }
 
-async function stopRecording(){
+function stopRecording(){
 
 clearInterval(timerInterval);
 cancelAnimationFrame(animationId);
@@ -157,15 +157,12 @@ offset+=c.length;
 let wav = encodeWAV(data, audioContext.sampleRate);
 let base64 = arrayBufferToBase64(wav);
 
-await fetch("/upload_audio", {
-method: "POST",
-headers: {"Content-Type": "application/json"},
-body: JSON.stringify({audio: base64})
-});
+window.parent.postMessage({
+type: "streamlit:setComponentValue",
+value: base64
+}, "*");
 
 stream.getTracks().forEach(t=>t.stop());
-
-alert("Audio enregistré sur le serveur");
 }
 
 function encodeWAV(samples,sampleRate){
@@ -216,24 +213,23 @@ return btoa(binary);
 height=420,
 )
 
-# endpoint réception audio
-from streamlit.runtime.scriptrunner import get_script_run_ctx
-from streamlit.web.server.server import Server
-
-def save_audio(base64_audio):
-    audio_bytes = base64.b64decode(base64_audio)
+# Sauvegarde du fichier reçu
+if audio_base64:
+    audio_bytes = base64.b64decode(audio_base64)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     path = os.path.join(data_dir, f"audio_{timestamp}.wav")
+
     with open(path, "wb") as f:
         f.write(audio_bytes)
-    return path
+
+    st.success(f"Audio sauvegardé : {path}")
 
 st.divider()
 st.subheader("Fichiers enregistrés")
 
 files = sorted(os.listdir("audio"), reverse=True)
 
-if len(files) == 0:
+if not files:
     st.write("Aucun fichier pour l'instant")
 else:
     for file in files:
@@ -247,7 +243,7 @@ else:
         with col2:
             with open(path, "rb") as f:
                 st.download_button(
-                    label="Download",
+                    "Download",
                     data=f,
                     file_name=file,
                     mime="audio/wav",
