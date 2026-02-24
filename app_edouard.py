@@ -1,130 +1,152 @@
 import streamlit as st
-import io
+import os
+from datetime import datetime
 import numpy as np
-from scipy import signal
+import librosa
 import soundfile as sf
-from audiorecorder import audiorecorder
 
-st.set_page_config(page_title="Uroflow Enregistreur - Anti-AGC", layout="centered")
+st.title("Uroflow acoustique – Enregistrement audio")
 
-st.title("Enregistreur uroflow meter (~45 secondes)")
+# dossier de stockage serveur
+data_dir = "audio"
+os.makedirs(data_dir, exist_ok=True)
 
-st.markdown("""
-**Fonctionnement anti-AGC** :  
-Un ton continu faible à **80 Hz** est émis par le haut-parleur du téléphone pendant l'enregistrement.  
-Cela empêche la plupart des AGC / filtres vocaux automatiques de s'activer sur les téléphones modernes.  
 
-Le ton est ensuite supprimé automatiquement via filtre notch avant téléchargement.
+# ===============================
+# Correction AGC robuste
+# ===============================
+def correct_agc_robust(
+    input_path,
+    output_path,
+    frame_length=2048,
+    hop_length=512,
+    agc_sensitivity=2.5,
+    agc_gain_limit=4.0,
+    min_agc_duration=0.5
+):
 
-**Étapes** :
-1. Clique sur **Démarrer ton 80 Hz**
-2. Lance l'enregistrement avec le bouton rouge
-3. Arrête → télécharge le fichier nettoyé (.wav)
-""")
+    y, sr = librosa.load(input_path, sr=None, mono=True)
 
-# Contrôle du ton 80 Hz
-if 'tone_active' not in st.session_state:
-    st.session_state.tone_active = False
+    rms = librosa.feature.rms(
+        y=y,
+        frame_length=frame_length,
+        hop_length=hop_length
+    )[0]
 
-col1, col2 = st.columns(2)
-with col1:
-    if st.button("Démarrer ton 80 Hz (anti-AGC)", type="primary", use_container_width=True):
-        st.session_state.tone_active = True
-        st.success("Ton actif – commence l'enregistrement")
+    diff = np.diff(rms)
 
-with col2:
-    if st.button("Arrêter ton", use_container_width=True):
-        st.session_state.tone_active = False
-        st.info("Ton arrêté")
+    threshold = -np.std(diff) * agc_sensitivity
+    candidates = np.where(diff < threshold)[0]
 
-# JS pour émettre le ton (client-side)
-if st.session_state.tone_active:
-    st.components.v1.html(
-        """
-        <script>
-        (function startTone() {
-            if (window.oscillator) return;
-            window.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            window.oscillator = window.audioCtx.createOscillator();
-            const gainNode = window.audioCtx.createGain();
-            window.oscillator.type = 'sine';
-            window.oscillator.frequency.value = 80;
-            gainNode.gain.value = 0.035;  // faible volume – ajuste si besoin
-            window.oscillator.connect(gainNode);
-            gainNode.connect(window.audioCtx.destination);
-            window.oscillator.start();
-            console.log('Ton 80 Hz démarré');
-        })();
-        </script>
-        """,
-        height=0
+    agc_frame = None
+    min_frames = int((min_agc_duration * sr) / hop_length)
+
+    for c in candidates:
+        if c > 20 and c + min_frames < len(rms):
+
+            pre = np.median(rms[c-20:c])
+            post = np.median(rms[c:c+min_frames])
+
+            drop_ratio = post / (pre + 1e-8)
+
+            if drop_ratio < 0.65:
+                agc_frame = c
+                break
+
+    if agc_frame is not None:
+
+        agc_sample = agc_frame * hop_length
+
+        ref_start = int(max(0, agc_sample - sr * 1.5))
+        ref_end = agc_sample
+        ref_segment = y[ref_start:ref_end]
+
+        rms_ref = np.sqrt(np.mean(ref_segment**2)) + 1e-8
+        rms_post = np.sqrt(np.mean(y[agc_sample:]**2)) + 1e-8
+
+        gain = rms_ref / rms_post
+        gain = min(gain, agc_gain_limit)
+
+        y_corrected = y.copy()
+        y_corrected[agc_sample:] *= gain
+
+    else:
+        y_corrected = y
+
+    y_corrected = np.clip(y_corrected, -1, 1)
+
+    sf.write(output_path, y_corrected, sr)
+
+    return agc_frame is not None
+
+
+# ===============================
+# Enregistrement audio
+# ===============================
+st.write("Appuyez sur enregistrer puis stop.")
+
+audio = st.audio_input("Enregistrer (format WAV)")
+
+if audio is not None:
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    raw_path = os.path.join(data_dir, f"uroflow_raw_{timestamp}.wav")
+    processed_path = os.path.join(data_dir, f"uroflow_corrected_{timestamp}.wav")
+
+    # sauvegarde WAV brut
+    with open(raw_path, "wb") as f:
+        f.write(audio.getbuffer())
+
+    # correction AGC
+    agc_detected = correct_agc_robust(
+        raw_path,
+        processed_path
     )
-else:
-    st.components.v1.html(
-        """
-        <script>
-        if (window.oscillator) {
-            window.oscillator.stop();
-            window.oscillator = null;
-            console.log('Ton arrêté');
-        }
-        </script>
-        """,
-        height=0
-    )
 
-# Widget d'enregistrement – fréquence native du téléphone
-st.markdown("**Enregistrez l'écoulement d'urine (ton actif si démarré ci-dessus)**")
-audio = audiorecorder(
-    start_prompt="Démarrer l'enregistrement",
-    stop_prompt="Arrêter l'enregistrement",
-    pause_prompt="",                    # pas de bouton pause
-    show_visualizer=True,
-    key="uroflow_recorder"
-)
+    st.success("Enregistrement terminé")
 
-if len(audio) > 0:
-    st.success("Enregistrement terminé !")
+    st.write("AGC détecté :", agc_detected)
 
-    # Lecture brute (avec ton audible pour vérif)
-    st.audio(audio.export(format="wav").read(), format="audio/wav")
+    st.audio(processed_path)
 
-    try:
-        wav_bytes = audio.export(format="wav").read()
-        with io.BytesIO(wav_bytes) as f:
-            data, sr = sf.read(f)
-
-        st.caption(f"Fréquence d'échantillonnage détectée : {sr} Hz (fréquence native du téléphone)")
-
-        # Filtre notch pour supprimer ~80 Hz
-        notch_freq = 80.0
-        q = 35.0  # filtre étroit
-        b, a = signal.iirnotch(notch_freq / (sr / 2.0), q)
-        data_clean = signal.filtfilt(b, a, data)
-
-        clean_buffer = io.BytesIO()
-        sf.write(clean_buffer, data_clean, sr, format='WAV', subtype='PCM_16')
-        clean_buffer.seek(0)
-
+    # téléchargement du fichier corrigé
+    with open(processed_path, "rb") as f:
         st.download_button(
-            label="Télécharger WAV propre (sans ton 80 Hz)",
-            data=clean_buffer,
-            file_name="uroflow_enregistrement_clean.wav",
-            mime="audio/wav",
-            use_container_width=True
+            label="Télécharger le WAV corrigé",
+            data=f,
+            file_name=os.path.basename(processed_path),
+            mime="audio/wav"
         )
 
-        st.info("Fichier nettoyé – prêt pour ton analyse ML.")
 
-    except Exception as e:
-        st.error(f"Erreur lors du traitement : {str(e)}")
-        st.info("Essaie un enregistrement plus court (10-20 s) pour tester.")
+# ===============================
+# Historique fichiers
+# ===============================
+st.divider()
+st.subheader("Fichiers enregistrés")
+
+files = sorted(os.listdir(data_dir), reverse=True)
+
+if len(files) == 0:
+    st.write("Aucun fichier pour le moment")
 
 else:
-    st.info("Appuie sur le bouton rouge ci-dessus. Autorise le microphone quand demandé.")
+    for file in files:
 
-st.markdown("---")
-st.caption("Composant : streamlit-audiorecorder")
-st.caption("Fréquence : native du téléphone (généralement 44100 ou 48000 Hz)")
-st.caption("Ton 80 Hz client-side • Filtre scipy serveur-side")
-st.caption("HTTPS obligatoire sur mobile (Streamlit Cloud)")
+        path = os.path.join(data_dir, file)
+
+        col1, col2 = st.columns([3, 1])
+
+        with col1:
+            st.audio(path)
+
+        with col2:
+            with open(path, "rb") as f:
+                st.download_button(
+                    "Download",
+                    f,
+                    file_name=file,
+                    mime="audio/wav",
+                    key=file
+                )
