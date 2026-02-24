@@ -94,8 +94,8 @@ components.html("""
     display: none;
     flex-direction: column;
     align-items: center;
-    margin-top: 20px;
     width: 100%;
+    margin-top: 20px;
   }
 
   #download-btn {
@@ -109,7 +109,16 @@ components.html("""
     box-shadow: 0 0 20px rgba(0,200,0,0.5);
     width: 80%;
     max-width: 300px;
+    display: block;
+    margin: 0 auto;
     -webkit-tap-highlight-color: transparent;
+  }
+
+  #dl-link {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    text-decoration: none;
   }
 </style>
 </head>
@@ -121,8 +130,8 @@ components.html("""
 <div id="warning">⚠️ Arrêt automatique à 60s</div>
 
 <div id="download-section">
-  <p style="color:#aaa; margin-bottom:10px;">Enregistrement prêt :</p>
-  <a id="dl-link" download="uroflow.wav" style="width:80%;max-width:300px;text-decoration:none;">
+  <p style="color:#aaa; margin-bottom:10px; text-align:center;">Enregistrement prêt :</p>
+  <a id="dl-link" download="uroflow.wav" style="text-decoration:none;">
     <button id="download-btn">&#11015; Télécharger WAV</button>
   </a>
 </div>
@@ -140,6 +149,17 @@ function formatTime(s) {
   var m = Math.floor(s / 60);
   var sec = s % 60;
   return (m < 10 ? '0' : '') + m + ':' + (sec < 10 ? '0' : '') + sec;
+}
+
+function getTimestamp() {
+  var now = new Date();
+  var yyyy = now.getFullYear();
+  var mm   = String(now.getMonth() + 1).padStart(2, '0');
+  var dd   = String(now.getDate()).padStart(2, '0');
+  var hh   = String(now.getHours()).padStart(2, '0');
+  var min  = String(now.getMinutes()).padStart(2, '0');
+  var ss   = String(now.getSeconds()).padStart(2, '0');
+  return yyyy + '-' + mm + '-' + dd + '_' + hh + '-' + min + '-' + ss;
 }
 
 function toggleRecording() {
@@ -221,17 +241,20 @@ function stopRecording() {
 
   var btn = document.getElementById('record-btn');
   btn.className = '';
-  btn.textContent = 'ENREGISTRER';
+  btn.innerHTML = '&#9210; ENREGISTRER';
   document.getElementById('status').textContent = 'Encodage WAV...';
 
   var savedSeconds = seconds;
+  var timestamp = getTimestamp();
 
   setTimeout(function() {
     try {
       var sr = audioCtx ? audioCtx.sampleRate : 44100;
       var wav = buildWAV(pcmChunks, sr);
       var url = URL.createObjectURL(wav);
+      var filename = 'uroflow_' + timestamp + '.wav';
       document.getElementById('dl-link').href = url;
+      document.getElementById('dl-link').download = filename;
       document.getElementById('download-section').style.display = 'flex';
       document.getElementById('status').textContent = '✅ ' + formatTime(savedSeconds) + ' enregistrés';
     } catch(e) {
