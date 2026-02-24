@@ -7,13 +7,12 @@ import soundfile as sf
 
 st.title("Uroflow acoustique – Enregistrement audio")
 
-# dossier de stockage serveur
 data_dir = "audio"
 os.makedirs(data_dir, exist_ok=True)
 
 
 # ===============================
-# Correction AGC robuste
+# Correction AGC robuste + diagnostic
 # ===============================
 def correct_agc_robust(
     input_path,
@@ -53,6 +52,14 @@ def correct_agc_robust(
                 agc_frame = c
                 break
 
+    diagnostic = {
+        "agc_detected": False,
+        "agc_time_sec": None,
+        "rms_before": None,
+        "rms_after": None,
+        "gain_applied": None
+    }
+
     if agc_frame is not None:
 
         agc_sample = agc_frame * hop_length
@@ -70,6 +77,12 @@ def correct_agc_robust(
         y_corrected = y.copy()
         y_corrected[agc_sample:] *= gain
 
+        diagnostic["agc_detected"] = True
+        diagnostic["agc_time_sec"] = agc_sample / sr
+        diagnostic["rms_before"] = float(rms_ref)
+        diagnostic["rms_after"] = float(rms_post)
+        diagnostic["gain_applied"] = float(gain)
+
     else:
         y_corrected = y
 
@@ -77,7 +90,7 @@ def correct_agc_robust(
 
     sf.write(output_path, y_corrected, sr)
 
-    return agc_frame is not None
+    return diagnostic
 
 
 # ===============================
@@ -85,68 +98,52 @@ def correct_agc_robust(
 # ===============================
 st.write("Appuyez sur enregistrer puis stop.")
 
-audio = st.audio_input("Enregistrer (format WAV)")
+audio = st.audio_input("Enregistrer (WAV)")
 
 if audio is not None:
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    raw_path = os.path.join(data_dir, f"uroflow_raw_{timestamp}.wav")
-    processed_path = os.path.join(data_dir, f"uroflow_corrected_{timestamp}.wav")
+    raw_path = os.path.join(data_dir, f"temp_raw.wav")
+    processed_path = os.path.join(data_dir, f"uroflow_{timestamp}.wav")
 
-    # sauvegarde WAV brut
+    # on écrase toujours le brut (temporaire)
     with open(raw_path, "wb") as f:
         f.write(audio.getbuffer())
 
-    # correction AGC
-    agc_detected = correct_agc_robust(
+    diagnostic = correct_agc_robust(
         raw_path,
         processed_path
     )
 
     st.success("Enregistrement terminé")
 
-    st.write("AGC détecté :", agc_detected)
-
+    # Lecture audio corrigé
     st.audio(processed_path)
 
-    # téléchargement du fichier corrigé
+    # ===============================
+    # Diagnostic AGC
+    # ===============================
+    st.subheader("Diagnostic AGC")
+
+    if diagnostic["agc_detected"]:
+
+        st.write("AGC détecté")
+        st.write(f"Moment AGC : {diagnostic['agc_time_sec']:.2f} secondes")
+        st.write(f"Niveau avant AGC (RMS) : {diagnostic['rms_before']:.5f}")
+        st.write(f"Niveau après AGC (RMS) : {diagnostic['rms_after']:.5f}")
+        st.write(f"Gain appliqué : {diagnostic['gain_applied']:.2f}")
+
+    else:
+        st.write("Aucun AGC détecté")
+
+    # ===============================
+    # Téléchargement unique
+    # ===============================
     with open(processed_path, "rb") as f:
         st.download_button(
-            label="Télécharger le WAV corrigé",
+            label="Télécharger le dernier fichier corrigé",
             data=f,
             file_name=os.path.basename(processed_path),
             mime="audio/wav"
         )
-
-
-# ===============================
-# Historique fichiers
-# ===============================
-st.divider()
-st.subheader("Fichiers enregistrés")
-
-files = sorted(os.listdir(data_dir), reverse=True)
-
-if len(files) == 0:
-    st.write("Aucun fichier pour le moment")
-
-else:
-    for file in files:
-
-        path = os.path.join(data_dir, file)
-
-        col1, col2 = st.columns([3, 1])
-
-        with col1:
-            st.audio(path)
-
-        with col2:
-            with open(path, "rb") as f:
-                st.download_button(
-                    "Download",
-                    f,
-                    file_name=file,
-                    mime="audio/wav",
-                    key=file
-                )
