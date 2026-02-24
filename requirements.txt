@@ -5,6 +5,5 @@ plotly==6.4.0
 streamlit==1.51.0
 ipywidgets
 pandas
-io
-scipy
-soundfile
+scipy>=1.11.0
+soundfile>=0.12.0
